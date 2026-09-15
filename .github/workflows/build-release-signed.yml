@@ -1,1 +1,87 @@
+name: Build MH Tour APK
 
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Check Android project
+        working-directory: android
+        run: |
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          echo "Android project OK"
+
+      - name: Build Debug APK
+        working-directory: android
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Create temporary release key
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$GITHUB_WORKSPACE/mh-tour-ci-release.jks" \
+            -storepass ci-test-password \
+            -keypass ci-test-password \
+            -alias mh-tour-ci \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 3650 \
+            -dname "CN=MH Tour CI,O=MH Tour,C=ID"
+
+      - name: Build Release APK
+        working-directory: android
+        run: |
+          gradle --no-daemon assembleRelease \
+            -PMH_KEYSTORE_FILE="$GITHUB_WORKSPACE/mh-tour-ci-release.jks" \
+            -PMH_KEYSTORE_PASSWORD=ci-test-password \
+            -PMH_KEY_ALIAS=mh-tour-ci \
+            -PMH_KEY_PASSWORD=ci-test-password
+
+      - name: Collect APK
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk MH_Tour_Debug.apk
+          cp android/app/build/outputs/apk/release/app-release.apk MH_Tour_Release.apk
+          ls -lh MH_Tour_*.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MH-Tour-APK
+          path: |
+            MH_Tour_Debug.apk
+            MH_Tour_Release.apk
+          retention-days: 30
